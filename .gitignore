@@ -1,0 +1,15 @@
+# Python virtual environment (recreate with `uv sync`)
+.venv/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# Generated Parquet data catalog (rebuild with scripts/catalog_setup.py)
+catalog/
+
+# Real secrets — never commit
+.env
+
+# macOS clutter
+.DS_Store
