@@ -37,11 +37,29 @@ IST = "Asia/Kolkata"
 # Contracts expire at the NSE close on their expiry date.
 EXPIRY_TIME = "15:30"
 
-# Exchange lot sizes (units per lot), checked against the OI steps in your 2026 data.
-# Lot sizes change over time: verify before loading older expiries.
-LOT_SIZES = {
-    "NIFTY": 65,
-    "BANKNIFTY": 30,
+# Exchange lot sizes (units per lot) over time, as (first expiry date, lot size).
+# A contract keeps the lot it was listed with, so the lot is chosen by EXPIRY date:
+# the latest entry starting on or before it. Source: the user's NSE history table,
+# plus Bank Nifty's 35 period (NSE circulars, Apr and Oct 2025).
+LOT_SIZE_HISTORY: dict[str, list[tuple[str, int]]] = {
+    "NIFTY": [
+        ("2015-01-01", 75),
+        ("2021-07-29", 50),
+        ("2024-05-02", 25),
+        ("2025-01-02", 75),
+        ("2026-01-06", 65),
+    ],
+    "BANKNIFTY": [
+        ("2015-01-01", 25),
+        ("2015-08-28", 30),
+        ("2016-04-29", 40),
+        ("2018-10-26", 20),
+        ("2020-07-30", 25),
+        ("2023-07-27", 15),
+        ("2024-11-20", 30),
+        ("2025-07-01", 35),
+        ("2026-01-01", 30),
+    ],
 }
 
 # Index names as Angel One / the data files spell them -> our clean symbol.
@@ -77,7 +95,7 @@ def make_instrument(
     """
     Return the Nautilus instrument for an Angel One trading symbol.
 
-    `lot_size` overrides the LOT_SIZES table (needed for stock F&O and old expiries).
+    `lot_size` overrides LOT_SIZE_HISTORY (needed for stock F&O).
     `activation_ns` is when the contract started trading, if known (UNIX nanoseconds).
     """
     if symbol in INDEX_NAMES:
@@ -116,7 +134,8 @@ def _make_option(
     activation_ns: int,
 ) -> OptionContract:
     underlying = match["underlying"]
-    lots = _lot_size(underlying, lot_size)
+    expiry_ns = _expiry_ns(match["expiry"])
+    lots = _lot_size(underlying, expiry_ns, lot_size)
     return OptionContract(
         instrument_id=InstrumentId(Symbol(symbol), Venue(NFO)),
         raw_symbol=Symbol(symbol),
@@ -130,7 +149,7 @@ def _make_option(
         option_kind=OptionKind.CALL if match["kind"] == "CE" else OptionKind.PUT,
         strike_price=Price(float(match["strike"]), TRADED_TICK.precision),
         activation_ns=activation_ns,
-        expiration_ns=_expiry_ns(match["expiry"]),
+        expiration_ns=expiry_ns,
         ts_event=0,
         ts_init=0,
     )
@@ -143,7 +162,8 @@ def _make_future(
     activation_ns: int,
 ) -> FuturesContract:
     underlying = match["underlying"]
-    lots = _lot_size(underlying, lot_size)
+    expiry_ns = _expiry_ns(match["expiry"])
+    lots = _lot_size(underlying, expiry_ns, lot_size)
     return FuturesContract(
         instrument_id=InstrumentId(Symbol(symbol), Venue(NFO)),
         raw_symbol=Symbol(symbol),
@@ -155,7 +175,7 @@ def _make_future(
         lot_size=Quantity.from_int(lots),
         underlying=underlying,
         activation_ns=activation_ns,
-        expiration_ns=_expiry_ns(match["expiry"]),
+        expiration_ns=expiry_ns,
         ts_event=0,
         ts_init=0,
     )
@@ -174,14 +194,22 @@ def _make_equity(symbol: str) -> Equity:
     )
 
 
-def _lot_size(underlying: str, override: int | None) -> int:
+def _lot_size(underlying: str, expiry_ns: int, override: int | None) -> int:
+    """The lot in force for a contract of `underlying` expiring at `expiry_ns`."""
     if override is not None:
         return override
-    if underlying not in LOT_SIZES:
+    if underlying not in LOT_SIZE_HISTORY:
         raise ValueError(
-            f"No lot size known for {underlying!r}: add it to LOT_SIZES or pass lot_size="
+            f"No lot size known for {underlying!r}: add it to LOT_SIZE_HISTORY or pass lot_size="
         )
-    return LOT_SIZES[underlying]
+    expiry_date = pd.Timestamp(expiry_ns, tz=IST).strftime("%Y-%m-%d")
+    lots = None
+    for start_date, size in LOT_SIZE_HISTORY[underlying]:
+        if start_date <= expiry_date:
+            lots = size
+    if lots is None:
+        raise ValueError(f"No lot size known for {underlying!r} expiring {expiry_date}")
+    return lots
 
 
 def _asset_class(underlying: str) -> AssetClass:

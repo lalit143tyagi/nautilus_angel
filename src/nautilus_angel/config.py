@@ -11,6 +11,7 @@ from nautilus_trader.config import BacktestDataConfig
 from nautilus_trader.config import BacktestEngineConfig
 from nautilus_trader.config import BacktestVenueConfig
 from nautilus_trader.config import LoggingConfig
+from nautilus_trader.model.data import Bar
 
 
 # --- Paths -------------------------------------------------------------------
@@ -20,6 +21,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # The ParquetDataCatalog lives here (historical now, recorded live data later).
 CATALOG_PATH = PROJECT_ROOT / "catalog"
+
+# Drop historical OHLCV Parquet files here; scripts/catalog_setup.py reads it by default.
+HISTORICAL_DATA_PATH = PROJECT_ROOT / "data" / "historical"
 
 
 # --- Account / venue defaults ------------------------------------------------
@@ -49,7 +53,9 @@ def data_config(bar_types: list[str]) -> BacktestDataConfig:
     """Return a config telling the backtest which bars to read from the catalog."""
     return BacktestDataConfig(
         catalog_path=str(CATALOG_PATH),
-        data_cls="nautilus_trader.model.data:Bar",
+        # Must be the Bar class, not the "module:Bar" string: with the string,
+        # Nautilus 1.231 ignores `bar_types` and loads every bar in the catalog.
+        data_cls=Bar,
         bar_types=bar_types,
     )
 

@@ -8,6 +8,10 @@ __pycache__/
 # Generated Parquet data catalog (rebuild with scripts/catalog_setup.py)
 catalog/
 
+# Historical Parquet files (large; keep the folder itself)
+data/historical/*
+!data/historical/.gitkeep
+
 # Real secrets — never commit
 .env
 

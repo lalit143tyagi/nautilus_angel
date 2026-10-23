@@ -2,10 +2,10 @@
 Load OHLCV Parquet files into the Nautilus ParquetDataCatalog.
 
 Usage:
-    uv run python scripts/catalog_setup.py PATH [PATH ...]
+    uv run python scripts/catalog_setup.py [PATH ...]
         [--symbol NAME] [--lot-size UNDERLYING=N ...] [--stamped-at-close]
 
-PATH can be a .parquet file or a folder of them. Column names are matched
+PATH can be a .parquet file or a folder of them (default: data/historical/). Column names are matched
 flexibly (e.g. timestamp/datetime, or separate date + time columns), timestamps
 in any timezone are accepted (naive ones are treated as IST), and each symbol
 becomes an instrument (see nautilus_angel.instruments.factory) plus its bars.
@@ -15,16 +15,20 @@ Re-running on the same file is safe: files already in the catalog are skipped.
 
 import argparse
 from collections import Counter
+from functools import reduce
+from math import gcd
 from pathlib import Path
 
 import pandas as pd
 
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.instruments import FuturesContract
+from nautilus_trader.model.instruments import OptionContract
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 from nautilus_trader.persistence.wranglers import BarDataWrangler
 
 from nautilus_angel.config import CATALOG_PATH
+from nautilus_angel.config import HISTORICAL_DATA_PATH
 from nautilus_angel.instruments import factory
 
 
@@ -39,6 +43,7 @@ COLUMN_ALIASES = {
     "low": ["low", "l"],
     "close": ["close", "c", "ltp"],
     "volume": ["volume", "vol", "v", "qty"],
+    "oi": ["oi", "open_interest", "openinterest"],
 }
 
 OHLC = ["open", "high", "low", "close"]
@@ -50,12 +55,16 @@ MAX_FUTURE_LIFE = pd.Timedelta(days=100)
 
 def main() -> None:
     args = parse_args()
-    factory.LOT_SIZES.update(args.lot_size)
+    # A forced lot applies to every expiry of that underlying in this run.
+    for underlying, size in args.lot_size.items():
+        factory.LOT_SIZE_HISTORY[underlying] = [("1900-01-01", size)]
 
     catalog = ParquetDataCatalog(str(CATALOG_PATH))
     files = find_parquet_files(args.paths)
     print(f"Catalog: {CATALOG_PATH}")
     print(f"Files:   {len(files)}\n")
+    if not files:
+        raise SystemExit(f"No .parquet files found in {', '.join(map(str, args.paths))}")
 
     for path in files:
         load_file(path, catalog, args)
@@ -65,7 +74,13 @@ def main() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Load OHLCV Parquet files into the catalog.")
-    parser.add_argument("paths", nargs="+", type=Path, help="Parquet files or folders")
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        default=[HISTORICAL_DATA_PATH],
+        help=f"Parquet files or folders (default: {HISTORICAL_DATA_PATH})",
+    )
     parser.add_argument(
         "--symbol",
         help="Symbol to use when a file has no symbol column (default: the file name)",
@@ -76,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         type=parse_lot_size,
         metavar="UNDERLYING=N",
-        help="Override or add a lot size, e.g. --lot-size BANKNIFTY=35 (repeatable)",
+        help="Force one lot size for every expiry of an underlying, e.g. --lot-size BANKNIFTY=35 (repeatable)",
     )
     parser.add_argument(
         "--stamped-at-close",
@@ -119,6 +134,7 @@ def load_file(path: Path, catalog: ParquetDataCatalog, args: argparse.Namespace)
 
     kinds: Counter = Counter()
     skipped: list[str] = []
+    warnings: list[str] = []
     bar_count = 0
 
     for symbol, group in df.groupby("symbol", sort=False):
@@ -138,6 +154,11 @@ def load_file(path: Path, catalog: ParquetDataCatalog, args: argparse.Namespace)
                 )
                 continue
 
+        if isinstance(instrument, (FuturesContract, OptionContract)):
+            warning = check_lot_size(symbol, int(instrument.lot_size.as_double()), group)
+            if warning:
+                warnings.append(warning)
+
         bar_type = BarType.from_str(f"{instrument.id}-{minutes}-MINUTE-LAST-EXTERNAL")
         frame = group.set_index("timestamp")[OHLC + ["volume"]].astype("float64")
         bars = BarDataWrangler(bar_type, instrument).process(frame)
@@ -153,13 +174,52 @@ def load_file(path: Path, catalog: ParquetDataCatalog, args: argparse.Namespace)
         bar_count += len(bars)
 
     print(f"   bar size: {minutes} minute(s), rows after cleaning: {len(df):,}")
+    note = volume_unit_note(df)
+    if note:
+        print(f"   NOTE {note}")
     for name, count in fixes.items():
         if count:
             print(f"   fixed: {name}: {count:,}")
     print(f"   written: {dict(kinds)}, {bar_count:,} bars")
     for reason in skipped:
         print(f"   skipped {reason}")
+    for warning in warnings:
+        print(f"   WARNING {warning}")
     print()
+
+
+def check_lot_size(symbol: str, lot_size: int, group: pd.DataFrame) -> str | None:
+    """
+    Open interest (in units) only ever changes by whole lots, so the greatest common
+    divisor (GCD) of its changes is a multiple of the true lot. Warn when it isn't a
+    multiple of the lot we chose. Files without OI fall back to volume.
+    """
+    if group["oi"].notna().any():
+        source, steps = "OI changes", group["oi"].diff()
+    else:
+        source, steps = "volumes", group["volume"]
+    step = gcd_of_nonzero(steps)
+    if step and step % lot_size != 0:
+        return f"{symbol}: lot size {lot_size}, but {source} move in steps of {step}"
+    return None
+
+
+def volume_unit_note(df: pd.DataFrame) -> str | None:
+    """Say so when volume doesn't move in whole lots like OI does (i.e. isn't in units)."""
+    oi_step = gcd_of_nonzero(df.groupby("symbol")["oi"].diff())
+    volume_step = gcd_of_nonzero(df["volume"])
+    if oi_step and volume_step and volume_step % oi_step != 0:
+        return (
+            f"volume moves in steps of {volume_step} while OI moves in steps of {oi_step}: "
+            "volume is probably not in units (stored as given)"
+        )
+    return None
+
+
+def gcd_of_nonzero(values: pd.Series) -> int | None:
+    """GCD of the non-zero whole-number values (sign ignored); None if there are none."""
+    numbers = [abs(int(value)) for value in values.dropna() if value != 0]
+    return reduce(gcd, numbers) if numbers else None
 
 
 def read_bars(path: Path, default_symbol: str | None) -> pd.DataFrame:
@@ -186,13 +246,15 @@ def read_bars(path: Path, default_symbol: str | None) -> pd.DataFrame:
         df["symbol"] = default_symbol or path.stem
     if "volume" not in df.columns:
         df["volume"] = 0
+    if "oi" not in df.columns:
+        df["oi"] = float("nan")  # optional: only used to check lot sizes
 
     df["timestamp"] = to_utc(df["timestamp"])
-    for name in [*OHLC, "volume"]:
+    for name in [*OHLC, "volume", "oi"]:
         df[name] = pd.to_numeric(df[name], errors="coerce")
     df["symbol"] = df["symbol"].astype(str).str.strip()
 
-    return df[["timestamp", "symbol", *OHLC, "volume"]]
+    return df[["timestamp", "symbol", *OHLC, "volume", "oi"]]
 
 
 def alias_map(columns: list[str]) -> dict[str, str]:
