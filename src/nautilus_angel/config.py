@@ -10,6 +10,8 @@ from pathlib import Path
 from nautilus_trader.config import BacktestDataConfig
 from nautilus_trader.config import BacktestEngineConfig
 from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.config import ImportableFeeModelConfig
+from nautilus_trader.backtest.config import MarginModelConfig
 from nautilus_trader.config import LoggingConfig
 from nautilus_trader.model.data import Bar
 
@@ -37,8 +39,16 @@ BASE_CURRENCY = "INR"
 STARTING_BALANCE = "1000000 INR"
 
 
-def venue_config(venue: str = DEFAULT_VENUE) -> BacktestVenueConfig:
-    """Return the simulated exchange (venue) and the account we trade it with."""
+def venue_config(
+    venue: str = DEFAULT_VENUE,
+    equity_product: str = "INTRADAY",
+    margin_rates: dict[str, float] | None = None,
+) -> BacktestVenueConfig:
+    """
+    Return the simulated exchange (venue) and the account we trade it with,
+    charging Angel One fees (nautilus_angel.fees) and NSE-style margin
+    (nautilus_angel.margin). `margin_rates` overrides margin.DEFAULTS.
+    """
     return BacktestVenueConfig(
         name=venue,
         oms_type="NETTING",
@@ -46,6 +56,15 @@ def venue_config(venue: str = DEFAULT_VENUE) -> BacktestVenueConfig:
         default_leverage=1.0,
         base_currency=BASE_CURRENCY,
         starting_balances=[STARTING_BALANCE],
+        fee_model=ImportableFeeModelConfig(
+            fee_model_path="nautilus_angel.fees:AngelOneFeeModel",
+            config_path="nautilus_angel.fees:AngelOneFeeModelConfig",
+            config={"equity_product": equity_product},
+        ),
+        margin_model=MarginModelConfig(
+            model_type="nautilus_angel.margin:NseMarginModel",
+            config=margin_rates or {},
+        ),
     )
 
 
