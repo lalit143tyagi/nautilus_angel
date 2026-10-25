@@ -21,7 +21,6 @@ from nautilus_trader.model.data import Bar
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.instruments import IndexInstrument
 from nautilus_trader.trading.strategy import Strategy
 
 
@@ -52,12 +51,8 @@ class KeltnerStrategy(Strategy):
     def on_start(self) -> None:
         self.instrument = self.cache.instrument(self.config.instrument_id)
         if self.instrument is None:
+            # Log and stay idle (self.stop() isn't allowed while still starting).
             self.log.error(f"Instrument {self.config.instrument_id} not found in the cache")
-            self.stop()
-            return
-        if isinstance(self.instrument, IndexInstrument):
-            self.log.error(f"{self.config.instrument_id} is an index and cannot be traded")
-            self.stop()
             return
 
         # The engine updates the indicator with each bar before calling on_bar.

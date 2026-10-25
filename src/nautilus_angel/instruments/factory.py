@@ -11,6 +11,7 @@ Quantities are in units (shares), the same as Angel One's order quantity, so
 """
 
 import re
+from decimal import Decimal
 
 import pandas as pd
 
@@ -86,6 +87,14 @@ FUTURE_PATTERN = re.compile(
 TRADED_TICK = Price.from_str("0.05")
 INDEX_TICK = Price.from_str("0.01")
 
+# Margin as a fraction of position value, used by Nautilus's "standard" margin model.
+# Futures: SPAN + ELM is typically 10-12%. Options: the premium in full, which is right
+# for buyers but far too low for sellers (real seller margin is ~12% of the underlying).
+# Equity: intraday (about 5x leverage).
+FUTURES_MARGIN = Decimal("0.12")
+OPTIONS_MARGIN = Decimal("1.0")
+EQUITY_MARGIN = Decimal("0.20")
+
 
 def make_instrument(
     symbol: str,
@@ -152,6 +161,8 @@ def _make_option(
         expiration_ns=expiry_ns,
         ts_event=0,
         ts_init=0,
+        margin_init=OPTIONS_MARGIN,
+        margin_maint=OPTIONS_MARGIN,
     )
 
 
@@ -178,6 +189,8 @@ def _make_future(
         expiration_ns=expiry_ns,
         ts_event=0,
         ts_init=0,
+        margin_init=FUTURES_MARGIN,
+        margin_maint=FUTURES_MARGIN,
     )
 
 
@@ -191,6 +204,8 @@ def _make_equity(symbol: str) -> Equity:
         lot_size=Quantity.from_int(1),
         ts_event=0,
         ts_init=0,
+        margin_init=EQUITY_MARGIN,
+        margin_maint=EQUITY_MARGIN,
     )
 
 
