@@ -17,6 +17,7 @@ from nautilus_trader.config import BacktestDataConfig
 from nautilus_trader.config import BacktestEngineConfig
 from nautilus_trader.config import BacktestRunConfig
 from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.config import ImportableFeeModelConfig
 from nautilus_trader.config import ImportableStrategyConfig
 from nautilus_trader.config import LoggingConfig
 from nautilus_trader.model.data import Bar
@@ -61,6 +62,12 @@ def main() -> None:
         account_type="MARGIN",  # allows going short
         base_currency=constants.CURRENCY,
         starting_balances=[STARTING_BALANCE],
+        # Angel One brokerage + NFO statutory and exchange charges on every fill.
+        fee_model=ImportableFeeModelConfig(
+            fee_model_path="nautilus_angel.adapters.angelone.fees:AngelOneFeeModel",
+            config_path="nautilus_angel.adapters.angelone.fees:AngelOneFeeModelConfig",
+            config={},
+        ),
     )
 
     # What to load from the catalog.
@@ -119,13 +126,18 @@ def ist_midnight_ns(day: str, next_day: bool = False) -> int:
 def report(engine, result, units: int) -> None:
     """Print what the backtest did, from Nautilus's own result and reports."""
     positions = engine.trader.generate_positions_report()
+    fills = engine.trader.generate_fills_report()
     pnl = result.stats_pnls.get(constants.CURRENCY, {})
+    charges = fills["commission"].astype(str).str.split().str[0].astype(float).sum() if not fills.empty else 0.0
+    net = pnl.get("PnL (total)", 0.0)  # Nautilus's P&L is after commissions
 
     print(f"\n=== {INSTRUMENT_ID}, {START} to {END}, {units} units per trade ===")
     print(f"Bars processed: {result.iterations:,}")
     print(f"Orders:         {result.total_orders}")
     print(f"Positions:      {result.total_positions}")
-    print(f"P&L (total):    Rs {pnl.get('PnL (total)', 0.0):,.2f}  (no charges yet)")
+    print(f"Gross P&L:      Rs {net + charges:,.2f}")
+    print(f"Charges:        Rs {charges:,.2f}")
+    print(f"Net P&L:        Rs {net:,.2f}")
     print(f"Win rate:       {pnl.get('Win Rate', 0.0):.1%}")
     if not positions.empty:
         shown = positions[["entry", "peak_qty", "avg_px_open", "avg_px_close", "realized_pnl", "ts_opened", "ts_closed"]]

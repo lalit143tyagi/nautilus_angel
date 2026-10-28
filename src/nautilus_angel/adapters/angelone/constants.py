@@ -8,3 +8,8 @@ INSTRUMENT_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/
 
 # Seconds to wait for the instrument master download before giving up.
 DOWNLOAD_TIMEOUT_SECS = 60
+
+# Angel One brokerage on NFO futures and options: a flat Rs 20 per executed order
+# (angelone.in/exchange-transaction-charges, checked 2026-10-24). Charged once per
+# order however many fills it takes; also on orders that expire or are exercised.
+BROKERAGE_PER_ORDER = 20.0

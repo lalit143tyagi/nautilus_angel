@@ -3,7 +3,8 @@ Project settings and NSE market facts, in one place.
 
 Facts that change over time (lot sizes, market hours) are *schedules*: tuples of
 (first date, value), oldest first. Read them through the lookup functions at the
-bottom (lot_size, futures_tick, session, closing_auction), never by indexing them directly.
+bottom (lot_size, futures_tick, session, option_charges, futures_charges, closing_auction),
+never by indexing them directly.
 One-off trading days (Diwali Muhurat sessions) are in SPECIAL_SESSIONS.
 """
 
@@ -157,6 +158,43 @@ BANKNIFTY = Underlying(
 UNDERLYINGS = {underlying.symbol: underlying for underlying in (NIFTY, BANKNIFTY)}
 
 
+# --- Statutory and exchange charges (NFO) --------------------------------------
+# Rates are fractions of turnover (quantity x price; for options, the premium):
+# 0.1% is written 0.001. Brokerage is the broker's, not here (see adapters/angelone).
+
+
+@dataclass(frozen=True)
+class Charges:
+    """Per-trade charges on NFO that are set by the government and the exchange."""
+
+    stt_sell: float  # Securities Transaction Tax, charged to the seller
+    exchange: float  # NSE transaction charge (as Angel One passes it on), both sides
+    stamp_buy: float  # stamp duty, charged to the buyer
+
+
+# STT changes: Finance Acts (options 2016-06-01, both 2023-04-01, 2024-10-01, 2026-04-01).
+# Exchange charge: NSE's uniform rate from 2024-10-01 (earlier rate applied to all
+# older dates; NSE's pre-2021 slabs are not modelled). Stamp duty: the uniform national
+# rate from 2020-07-01, applied to older dates too (it was set by each state before).
+OPTION_CHARGES: tuple[tuple[date, Charges], ...] = (
+    (date(2015, 1, 1), Charges(stt_sell=0.00017, exchange=0.000495, stamp_buy=0.00003)),
+    (date(2016, 6, 1), Charges(stt_sell=0.0005, exchange=0.000495, stamp_buy=0.00003)),
+    (date(2023, 4, 1), Charges(stt_sell=0.000625, exchange=0.000495, stamp_buy=0.00003)),
+    (date(2024, 10, 1), Charges(stt_sell=0.001, exchange=0.000355299, stamp_buy=0.00003)),
+    (date(2026, 4, 1), Charges(stt_sell=0.0015, exchange=0.000355299, stamp_buy=0.00003)),
+)
+
+FUTURES_CHARGES: tuple[tuple[date, Charges], ...] = (
+    (date(2015, 1, 1), Charges(stt_sell=0.0001, exchange=0.0000188, stamp_buy=0.00002)),
+    (date(2023, 4, 1), Charges(stt_sell=0.000125, exchange=0.0000188, stamp_buy=0.00002)),
+    (date(2024, 10, 1), Charges(stt_sell=0.0002, exchange=0.000018299, stamp_buy=0.00002)),
+    (date(2026, 4, 1), Charges(stt_sell=0.0005, exchange=0.000018299, stamp_buy=0.00002)),
+)
+
+SEBI_FEE = 10 / 1e7  # Rs 10 per crore of turnover, both sides
+GST = 0.18  # on brokerage + exchange charge + SEBI fee (not on STT or stamp duty)
+
+
 # --- Lookups -------------------------------------------------------------------
 
 
@@ -195,6 +233,16 @@ def session(venue: str, on: date) -> Session:
     if on in SPECIAL_SESSIONS:
         return SPECIAL_SESSIONS[on]
     return in_force(schedules[venue], on)
+
+
+def option_charges(on: date) -> Charges:
+    """Statutory and exchange charges on NFO options for a trade on the date `on`."""
+    return in_force(OPTION_CHARGES, on)
+
+
+def futures_charges(on: date) -> Charges:
+    """Statutory and exchange charges on NFO futures for a trade on the date `on`."""
+    return in_force(FUTURES_CHARGES, on)
 
 
 def closing_auction(on: date) -> Session | None:
