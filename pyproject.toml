@@ -1,7 +1,7 @@
 [project]
 name = "nautilus-angel"
 version = "0.1.0"
-description = "Algorithmic trading on Nautilus Trader with a custom Angel One SmartAPI adapter"
+description = "NSE/NFO backtesting, paper and live trading on Nautilus Trader with Angel One SmartAPI"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
