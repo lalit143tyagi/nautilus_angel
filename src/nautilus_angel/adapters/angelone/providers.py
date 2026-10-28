@@ -9,9 +9,13 @@ their NFO options and futures.
                 provider.load_all({"underlyings": ["NIFTY"]}) loads only NIFTY.
 
 Both go through build_instrument(spec), so every instrument is built the same way.
-Instrument ids: options/futures "<trading symbol>.NFO"; indices "<underlying>.NSE"
-(e.g. BANKNIFTY.NSE, with the spelled-out name "Nifty Bank" as the raw symbol), so an
-option's `underlying` ("BANKNIFTY") names its index directly.
+
+Instrument ids: options/futures "<trading symbol>.NFO"; indices "<underlying>.NFO"
+(e.g. BANKNIFTY.NFO, with the spelled-out name "Nifty Bank" as the raw symbol).
+The index is on NFO, not NSE, because Nautilus settles an option at expiry against
+"<underlying>.<option's venue>". The exchange Angel One files each instrument under
+("NSE" for the index, "NFO" for options/futures) is kept in instrument.info["exchange"],
+with Angel One's token in instrument.info["token"] when known.
 """
 
 import json
@@ -103,7 +107,8 @@ def build_instrument(spec: ContractSpec, activation_ns: int = 0) -> Instrument:
 def _build_index(spec: ContractSpec) -> IndexInstrument:
     tick = _price(constants.INDEX_TICK)
     return IndexInstrument(
-        instrument_id=InstrumentId(Symbol(spec.underlying), Venue(spec.venue)),
+        # On the derivatives venue, so its options and futures can settle against it.
+        instrument_id=InstrumentId(Symbol(spec.underlying), Venue(constants.NFO)),
         raw_symbol=Symbol(spec.symbol),
         currency=INR,
         price_precision=PRICE_PRECISION,
@@ -119,7 +124,7 @@ def _build_index(spec: ContractSpec) -> IndexInstrument:
 def _build_option(spec: ContractSpec, activation_ns: int) -> OptionContract:
     tick = spec.tick_size if spec.tick_size is not None else constants.OPTION_TICK
     return OptionContract(
-        instrument_id=InstrumentId(Symbol(spec.symbol), Venue(spec.venue)),
+        instrument_id=InstrumentId(Symbol(spec.symbol), Venue(constants.NFO)),
         raw_symbol=Symbol(spec.symbol),
         asset_class=AssetClass.INDEX,
         currency=INR,
@@ -144,7 +149,7 @@ def _build_future(spec: ContractSpec, activation_ns: int) -> FuturesContract:
     else:
         tick = constants.futures_tick(spec.underlying, spec.expiry)
     return FuturesContract(
-        instrument_id=InstrumentId(Symbol(spec.symbol), Venue(spec.venue)),
+        instrument_id=InstrumentId(Symbol(spec.symbol), Venue(constants.NFO)),
         raw_symbol=Symbol(spec.symbol),
         asset_class=AssetClass.INDEX,
         currency=INR,
@@ -180,6 +185,9 @@ def _price(value) -> Price:
     return Price.from_str(f"{float(value):.{PRICE_PRECISION}f}")
 
 
-def _info(spec: ContractSpec) -> dict | None:
-    """Extra data stored with the instrument: Angel One's token, when known."""
-    return {"token": spec.token} if spec.token else None
+def _info(spec: ContractSpec) -> dict:
+    """Extra data stored with the instrument: Angel One's exchange, and token when known."""
+    info = {"exchange": spec.exchange}
+    if spec.token:
+        info["token"] = spec.token
+    return info

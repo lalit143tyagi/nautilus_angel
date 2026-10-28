@@ -32,7 +32,7 @@ class ContractSpec:
 
     kind: str  # OPTION, FUTURE or INDEX
     symbol: str  # Angel One trading symbol, e.g. "BANKNIFTY28JUL2658000CE" or "Nifty Bank"
-    venue: str  # NSE or NFO
+    exchange: str  # Angel One exchange segment ("exch_seg"): NSE for the index, NFO for derivatives
     underlying: str  # e.g. "BANKNIFTY"
     expiry: date | None = None  # options and futures
     strike: Decimal | None = None  # options
@@ -57,14 +57,14 @@ INDEX_NAMES = {underlying.index_name: underlying.symbol for underlying in UNDERL
 def parse_symbol(symbol: str) -> ContractSpec:
     """Parse an Angel One trading symbol (as in the historical data files)."""
     if symbol in INDEX_NAMES:
-        return ContractSpec(kind=INDEX, symbol=symbol, venue=NSE, underlying=INDEX_NAMES[symbol])
+        return ContractSpec(kind=INDEX, symbol=symbol, exchange=NSE, underlying=INDEX_NAMES[symbol])
 
     match = OPTION_SYMBOL.match(symbol)
     if match:
         return ContractSpec(
             kind=OPTION,
             symbol=symbol,
-            venue=NFO,
+            exchange=NFO,
             underlying=_known_underlying(match["underlying"], symbol),
             expiry=_parse_date(match["expiry"], "%d%b%y"),
             strike=Decimal(match["strike"]),
@@ -76,7 +76,7 @@ def parse_symbol(symbol: str) -> ContractSpec:
         return ContractSpec(
             kind=FUTURE,
             symbol=symbol,
-            venue=NFO,
+            exchange=NFO,
             underlying=_known_underlying(match["underlying"], symbol),
             expiry=_parse_date(match["expiry"], "%d%b%y"),
         )
@@ -117,7 +117,7 @@ def _with_master_fields(spec: ContractSpec, record: dict, tick_size: Decimal | N
     return ContractSpec(
         kind=spec.kind,
         symbol=spec.symbol,
-        venue=spec.venue,
+        exchange=spec.exchange,
         underlying=spec.underlying,
         expiry=spec.expiry,
         strike=spec.strike,

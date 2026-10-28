@@ -34,7 +34,9 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # --- Venues --------------------------------------------------------------------
 
-# One Nautilus venue per Angel One exchange segment (Angel One's "exch_seg").
+# Angel One exchange segments ("exch_seg"), also used as Nautilus venue names.
+# NIFTY / BANKNIFTY index instruments use the NFO venue in Nautilus (so options can
+# settle against them at expiry), while their hours are NSE's (see NSE_SESSIONS).
 NSE = "NSE"  # cash market: equities and indices
 NFO = "NFO"  # equity derivatives: index and stock futures and options
 
